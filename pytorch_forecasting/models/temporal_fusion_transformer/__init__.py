@@ -447,7 +447,8 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
         input dimensions: n_samples x time x variables
         x.keys() -> ['encoder_cat', 'encoder_cont', 'encoder_target', 'encoder_lengths', 'decoder_cat', 'decoder_cont', 'decoder_target', 'decoder_lengths', 'decoder_time_idx', 'groups', 'target_scale']
         x['encoder_cat'].shape -> [batch, encoder_length, number_of_cat_features] e.g. [1, 30, 1]
-        x['encoder_cont'].shape -> [1, 30, 16]
+        x['encoder_cont'].shape -> [1, 30, 16] -> real features normalized ['step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
+            'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
         x['encoder_target'].shape ->  [1, 30] -> target in the encoder part (e.g. nrn) -> e.g. tensor([[12.,  5.,  9.,  8.,  3.,  8.,  9., 10., 10.,  7.,  5.,  2.,  7.,  5.,
           5.,  6.,  3.,  2.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,
           0.,  0.]]) looks like un-normalized
@@ -463,11 +464,24 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
 
         encoder_lengths = x["encoder_lengths"]
         decoder_lengths = x["decoder_lengths"]
+        # x_cat -> torch.Size([1, 75, 1])
         x_cat = torch.cat([x["encoder_cat"], x["decoder_cat"]], dim=1)  # concatenate in time dimension
+        # x_cont -> torch.Size([1, 75, 16])
         x_cont = torch.cat([x["encoder_cont"], x["decoder_cont"]], dim=1)  # concatenate in time dimension
+        # timesteps
         timesteps = x_cont.size(1)  # encode + decode length
+        # max_encoder_length
         max_encoder_length = int(encoder_lengths.max())
+        # input_vectors['market_id'].shape torch.Size([1, 75, 16])
+        """
+        uses nn.Embedding() it's 16 not 100 because of a variable `max_embedding_size` (probably based on x_cont.shape[-1]) 
+        """
         input_vectors = self.input_embeddings(x_cat)
+        # add reals from x_cont
+        # len(input_vectors) = 17 (reals(16) + embeddings(1))
+        """
+        input_vectors['dayofweek_sin'].shape -> torch.Size([1, 75, 1])
+        """
         input_vectors.update(
             {
                 name: x_cont[..., idx].unsqueeze(-1)
@@ -479,7 +493,9 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
         # Embedding and variable selection
         if len(self.static_variables) > 0:
             # static embeddings will be constant over entire batch
+            # ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale']
             static_embedding = {name: input_vectors[name][:, 0] for name in self.static_variables}
+            # VariableSelectionNetwork
             static_embedding, static_variable_selection = self.static_variable_selection(static_embedding)
         else:
             static_embedding = torch.zeros(

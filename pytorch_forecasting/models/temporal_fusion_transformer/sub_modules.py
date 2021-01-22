@@ -317,6 +317,10 @@ class VariableSelectionNetwork(nn.Module):
         return len(self.input_sizes)
 
     def forward(self, x: Dict[str, torch.Tensor], context: torch.Tensor = None):
+        """
+        self.input_sizes = {'market_id': 16, 'step': 8, 'encoder_length': 8, 'nrn_center': 8, 'nrn_scale': 8}
+        8 comes from self.hparams.hidden_continuous_size
+        """
         if self.num_inputs > 1:
             # transform single variables
             var_outputs = []
