@@ -958,6 +958,12 @@ class TimeSeriesDataSet(Dataset):
                 ]
 
         # continuous covariates
+        """
+        using the target_centre and scale as features (unique per group) 
+        encoder_length is all zeros
+        continuous = ['step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
+            'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+        """
         continuous = check_for_nonfinite(
             torch.tensor(data[self.reals].to_numpy(dtype=np.float), dtype=torch.float), self.reals
         )

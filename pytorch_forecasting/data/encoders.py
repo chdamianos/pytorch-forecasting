@@ -510,6 +510,7 @@ class GroupNormalizer(TorchNormalizer):
         Returns:
             self
         """
+        # add 1 + 1e8 to target...
         y = self.preprocess(y)
         if len(self.groups) == 0:
             assert not self.scale_by_group, "No groups are defined, i.e. `scale_by_group=[]`"
@@ -561,6 +562,15 @@ class GroupNormalizer(TorchNormalizer):
 
         else:
             if self.method == "standard":
+                # for every group calculates mean and std
+                """
+                self.norm_ =
+                           center         scale
+                    group                        
+                    0      1.000000  1.000000e-08
+                    1      4.000000  3.522131e+00
+                    ...
+                """
                 self.norm_ = (
                     X[self.groups]
                     .assign(y=y)
@@ -583,6 +593,7 @@ class GroupNormalizer(TorchNormalizer):
             if not self.center:  # swap center and scale
                 self.norm_["scale"] = self.norm_["center"]
                 self.norm_["center"] = 0.0
+            # self.missing_ {'center': 1.6666666766666633, 'scale': 1.3884984536173952}
             self.missing_ = self.norm_.median().to_dict()
         return self
 

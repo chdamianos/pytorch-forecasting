@@ -1024,26 +1024,65 @@ class BaseModelWithCovariates(BaseModel):
         """
         # assert fixed encoder and decoder length for the moment
         if allowed_encoder_known_variable_names is None:
+            """
+            allowed_encoder_known_variable_names = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
+                        'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+            """
             allowed_encoder_known_variable_names = (
                 dataset.time_varying_known_categoricals + dataset.time_varying_known_reals
             )
 
         # embeddings
+        # encode each categorical to a label from zero to n
+        """
+        dataset.categorical_encoders = {'__group_id__group': NaNLabelEncoder(),
+                                     'group': NaNLabelEncoder(),
+                                     'market_id': NaNLabelEncoder()}
+        dataset.categoricals = ['market_id']
+        dataset.categorical_encoders['market_id'].classes_ = {'100068': 0, '100082': 1, '100086': 2,...}
+        embedding_labels = {'market_id': {'100068': 0,  '100082': 1,  '100086': 2,  ...}}
+        """
         embedding_labels = {
             name: encoder.classes_
             for name, encoder in dataset.categorical_encoders.items()
             if name in dataset.categoricals
         }
+        # dataset.dropout_categoricals = []
         embedding_paddings = dataset.dropout_categoricals
         # determine embedding sizes based on heuristic
+        """
+        embedding_sizes = {'market_id': (1801, 100)} where 1801 is the number of unique market_ids in the training dataset
+        """
         embedding_sizes = {
             name: (len(encoder.classes_), get_embedding_size(len(encoder.classes_)))
             for name, encoder in dataset.categorical_encoders.items()
             if name in dataset.categoricals
         }
+        # if user passed a dictionary for embedding size replace
         embedding_sizes.update(kwargs.get("embedding_sizes", {}))
+        # set to kwargs (also as default return (why? since we are setting it shouldn't be empty))
+        """
+        kwargs = {'max_encoder_length': 30, 'n_targets': 1, 'output_size': 7, 'learning_rate': 0.03, 'hidden_size': 16, 'attention_head_size': 1,
+                 'dropout': 0.1, 'hidden_continuous_size': 8, 'loss': QuantileLoss(), 'log_interval': 10, 'reduce_on_plateau_patience': 4,
+                 'embedding_sizes': {'market_id': (1801, 100)}}
+        """
         kwargs.setdefault("embedding_sizes", embedding_sizes)
-
+        """
+        new_kwargs = {'static_categoricals': ['market_id'],
+             'time_varying_categoricals_encoder': [],
+             'time_varying_categoricals_decoder': [],
+             'static_reals': ['step', 'encoder_length', 'nrn_center', 'nrn_scale'],
+             'time_varying_reals_encoder': ['time_idx',  'dayofweek_sin',  'dayofweek_cos',  'month_sin',  'month_cos',  'ly_n_visitors',  'ly_nrn',
+              'ly_dayofweek_sin',  'ly_dayofweek_cos',  'ly_month_sin',  'ly_month_cos',  'relative_time_idx'],
+             'time_varying_reals_decoder': ['time_idx',  'dayofweek_sin',  'dayofweek_cos',  'month_sin',  'month_cos',  'ly_n_visitors',  'ly_nrn',  'ly_dayofweek_sin',
+              'ly_dayofweek_cos',  'ly_month_sin',  'ly_month_cos',  'relative_time_idx'],
+             'x_reals': ['step',  'encoder_length',  'nrn_center',  'nrn_scale',  'time_idx',  'dayofweek_sin',  'dayofweek_cos',  'month_sin',  'month_cos',
+              'ly_n_visitors',  'ly_nrn',  'ly_dayofweek_sin',  'ly_dayofweek_cos',  'ly_month_sin',  'ly_month_cos',  'relative_time_idx'],
+             'x_categoricals': ['market_id'],
+             'embedding_labels': {'market_id': {'100068': 0,   '100082': 1,   '100086': 2,   '100096': 3,   '100110': 4,   ...}},
+             'embedding_paddings': [],
+             'categorical_groups': {}}
+        """
         new_kwargs = dict(
             static_categoricals=dataset.static_categoricals,
             time_varying_categoricals_encoder=[

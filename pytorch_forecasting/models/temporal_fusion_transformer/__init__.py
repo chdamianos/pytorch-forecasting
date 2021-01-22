@@ -344,6 +344,7 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
             TemporalFusionTransformer
         """
         # add maximum encoder length
+        # new_kwargs = {'max_encoder_length': 30}
         new_kwargs = dict(max_encoder_length=dataset.max_encoder_length)
 
         # infer output size
@@ -354,9 +355,22 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
                 return len(normalizer.classes_)
             else:
                 return 1
-
+        """
+        kwargs = {'learning_rate': 0.03,
+                 'hidden_size': 16,
+                 'attention_head_size': 1,
+                 'dropout': 0.1,
+                 'hidden_continuous_size': 8,
+                 'output_size': 7,
+                 'loss': QuantileLoss(),
+                 'log_interval': 10,
+                 'reduce_on_plateau_patience': 4}
+        """
+        # default to QuantileLoss() is none provided
         loss = kwargs.get("loss", QuantileLoss())
         # handle multiple targets
+        # dataset.target_names->['nrn']
+        # the output can be > 1 even if len(dataset.target_names)==1 because of Quantile loss
         new_kwargs["n_targets"] = len(dataset.target_names)
         if new_kwargs["n_targets"] > 1:  # try to infer number of ouput sizes
             new_kwargs["output_size"] = [
@@ -368,10 +382,24 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
             new_kwargs["loss"] = loss
         else:
             new_kwargs["output_size"] = get_output_size(dataset.target_normalizer, loss)
-
+        """
+        new_kwargs = {'max_encoder_length': 30, 'n_targets': 1, 'output_size': 7}
+        """
         # update defaults
         new_kwargs.update(kwargs)
-
+        """
+        new_kwargs = {'max_encoder_length': 30,
+             'n_targets': 1,
+             'output_size': 7,
+             'learning_rate': 0.03,
+             'hidden_size': 16,
+             'attention_head_size': 1,
+             'dropout': 0.1,
+             'hidden_continuous_size': 8,
+             'loss': QuantileLoss(),
+             'log_interval': 10,
+             'reduce_on_plateau_patience': 4}
+        """
         # create class and return
         return super().from_dataset(
             dataset, allowed_encoder_known_variable_names=allowed_encoder_known_variable_names, **new_kwargs
@@ -417,7 +445,22 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
     def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         input dimensions: n_samples x time x variables
+        x.keys() -> ['encoder_cat', 'encoder_cont', 'encoder_target', 'encoder_lengths', 'decoder_cat', 'decoder_cont', 'decoder_target', 'decoder_lengths', 'decoder_time_idx', 'groups', 'target_scale']
+        x['encoder_cat'].shape -> [batch, encoder_length, number_of_cat_features] e.g. [1, 30, 1]
+        x['encoder_cont'].shape -> [1, 30, 16]
+        x['encoder_target'].shape ->  [1, 30] -> target in the encoder part (e.g. nrn) -> e.g. tensor([[12.,  5.,  9.,  8.,  3.,  8.,  9., 10., 10.,  7.,  5.,  2.,  7.,  5.,
+          5.,  6.,  3.,  2.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,
+          0.,  0.]]) looks like un-normalized
+        x['encoder_lengths'] -> tensor([30])
+        x['decoder_cat'].shape -> batch, encoder_length, 1] e.g. [1, 45, 1], same as encoder_cat but for the length of the decoder e.g. tensor([[[89],[89],...]])
+        x['decoder_cont'].shape -> [1, 45, 16] -> same as encoder_cont but for the length of the decoder
+        x['decoder_target'].shape -> torch.Size([1, 45])
+        x['decoder_lengths'] -> tensor([45])
+        x['decoder_time_idx'] -> torch.Size([1, 45]) -> tensor([[30, 31, ..., 74]])
+        x['groups'] -> tensor([[0]])
+        x['target_scale'] -> tensor([[4.1467, 4.8231]])
         """
+
         encoder_lengths = x["encoder_lengths"]
         decoder_lengths = x["decoder_lengths"]
         x_cat = torch.cat([x["encoder_cat"], x["decoder_cat"]], dim=1)  # concatenate in time dimension
