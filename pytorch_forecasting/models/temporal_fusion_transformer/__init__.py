@@ -10,12 +10,12 @@ from pytorch_lightning.metrics import Metric as LightningMetric
 import torch
 from torch import nn
 
-from pytorch_forecasting.data import TimeSeriesDataSet
-from pytorch_forecasting.data.encoders import NaNLabelEncoder
-from pytorch_forecasting.metrics import MAE, MAPE, MASE, RMSE, SMAPE, MultiHorizonMetric, MultiLoss, QuantileLoss
-from pytorch_forecasting.models.base_model import BaseModelWithCovariates
-from pytorch_forecasting.models.nn import LSTM, MultiEmbedding
-from pytorch_forecasting.models.temporal_fusion_transformer.sub_modules import (
+from ...data import TimeSeriesDataSet
+from ...data.encoders import NaNLabelEncoder
+from ...metrics import MAE, MAPE, MASE, RMSE, SMAPE, MultiHorizonMetric, MultiLoss, QuantileLoss
+from ..base_model import BaseModelWithCovariates
+from ...models.nn import LSTM, MultiEmbedding
+from ...models.temporal_fusion_transformer.sub_modules import (
     AddNorm,
     GateAddNorm,
     GatedLinearUnit,
@@ -23,7 +23,7 @@ from pytorch_forecasting.models.temporal_fusion_transformer.sub_modules import (
     InterpretableMultiHeadAttention,
     VariableSelectionNetwork,
 )
-from pytorch_forecasting.utils import autocorrelation, create_mask, integer_histogram, padded_stack, to_list
+from ...utils import autocorrelation, create_mask, integer_histogram, padded_stack, to_list
 
 
 class TemporalFusionTransformer(BaseModelWithCovariates):
@@ -168,6 +168,13 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
                 for name in self.hparams.static_reals
             }
         )
+        # static_input_sizes-> {'encoder_length': 8, 'market_id': 16, 'nrn_center': 8, 'nrn_scale': 8, 'step': 8}
+        # self.hparams.hidden_size -> 16
+        # input_embedding_flags = {'market_id': True}
+        # self.hparams.dropout = 0.1
+        # self.prescalers 
+        # ModuleDict((step): Linear(in_features=1, out_features=8, bias=True),
+        #            (encoder_length): Linear(in_features=1, out_features=8, bias=True)...
         self.static_variable_selection = VariableSelectionNetwork(
             input_sizes=static_input_sizes,
             hidden_size=self.hparams.hidden_size,
@@ -215,7 +222,21 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
                         self.hparams.hidden_size,
                         self.hparams.dropout,
                     )
-
+        # encoder_input_sizes -> {'dayofweek_cos': 8, 'dayofweek_sin': 8, 'ly_dayofweek_cos': 8, 
+        # 'ly_dayofweek_sin': 8, 'ly_month_cos': 8, 
+        # 'ly_month_sin': 8, 'ly_n_visitors': 8, 'ly_nrn': 8, 'month_cos': 8, 'month_sin': 8, 
+        # 'relative_time_idx': 8, 'time_idx': 8}
+        # 8 = self.hparams.hidden_continuous_size
+        # 
+        # len(encoder_input_sizes)=12
+        # self.hparams.hidden_size = 16
+        # input_embedding_flags = {}
+        # self.hparams.dropout = 0.1
+        # self.hparams.hidden_size = 16
+        # self.prescalers = ModuleDict(
+        #   (step): Linear(in_features=1, out_features=8, bias=True)
+        #   (encoder_length): Linear(in_features=1, out_features=8, bias=True)
+        #   (nrn_center): Linear(in_features=1, out_features=8, bias=True) ...
         self.encoder_variable_selection = VariableSelectionNetwork(
             input_sizes=encoder_input_sizes,
             hidden_size=self.hparams.hidden_size,
@@ -474,7 +495,7 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
         max_encoder_length = int(encoder_lengths.max())
         # input_vectors['market_id'].shape torch.Size([1, 75, 16])
         """
-        uses nn.Embedding() it's 16 not 100 because of a variable `max_embedding_size` (probably based on x_cont.shape[-1]) 
+        uses nn.Embedding() it's 16 not 100 because of a variable `max_embedding_size` (probably based on hidden_size) 
         """
         input_vectors = self.input_embeddings(x_cat)
         # add reals from x_cont
@@ -494,22 +515,89 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
         if len(self.static_variables) > 0:
             # static embeddings will be constant over entire batch
             # ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale']
+            # static_embedding -> {'encoder_length': tensor([[1.]]), 
+            # 'market_id': tensor([[ 0.6381,  0...-1.0229]]), 
+            # 'nrn_center': tensor([[0.0557]]), 'nrn_scale': tensor([[0.0370]]), 'step': tensor([[-1.2247]])}
+            # input_vectors["market_id"].shape -> torch.Size([1, 75, 16])
+            # since it's the same for all time steps (75) we select the embeddings across the batches
+            # input_vectors["market_id"][:,0].shape -> torch.Size([1, 16])
             static_embedding = {name: input_vectors[name][:, 0] for name in self.static_variables}
             # VariableSelectionNetwork
+            # "variable selection"-weighted static embedding -> torch.Size([1, 16]) 
+            # 16 refers to hidden_size (hyperparamter)
             static_embedding, static_variable_selection = self.static_variable_selection(static_embedding)
         else:
             static_embedding = torch.zeros(
                 (x_cont.size(0), self.hparams.hidden_size), dtype=self.dtype, device=self.device
             )
             static_variable_selection = torch.zeros((x_cont.size(0), 0), dtype=self.dtype, device=self.device)
-
+        # self.static_context_variable_selection ->
+        #         self.static_context_variable_selection = GatedResidualNetwork(
+        #     input_size=self.hparams.hidden_size,
+        #     hidden_size=self.hparams.hidden_size,
+        #     output_size=self.hparams.hidden_size,
+        #     dropout=self.hparams.dropout,
+        # ) 
+        # where self.hparams.hidden_size=16, self.hparams.dropout=0.1
+        # self.static_context_variable_selection(static_embedding).shape -> torch.Size([1, 16])
+        # timesteps = 75
+        # static_context_variable_selection -> torch.Size([1, 75, 16])
         static_context_variable_selection = self.expand_static_context(
             self.static_context_variable_selection(static_embedding), timesteps
         )
 
+        # self.encoder_variables = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors', 'ly_nrn', 
+        # 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+        # max_encoder_length = 30
+        # input_vectors.keys() -> ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos',
+        #  'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+        # len(input_vectors.keys()) -> 17
+        # input_vectors['month_sin'].shape -> torch.Size([1, 75, 1])
+        # input_vectors['step'].shape -> torch.Size([1, 75, 1])
+
+        # @property
+        # def encoder_variables(self) -> List[str]:
+        #     """List of all encoder variables in model (excluding static variables)"""
+        #     return self.hparams.time_varying_categoricals_encoder + self.hparams.time_varying_reals_encoder
+        # self.hparams.time_varying_categoricals_encoder = []
+        # self.hparams.time_varying_reals_encoder = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 
+        # 'month_cos', 'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 
+        # 'ly_month_cos', 'relative_time_idx']
+        # so this is all 16 reals (x_cont.shape -> torch.Size([1, 75, 16])) EXCEPT those not 4 varying in time 
+        # ['step', 'encoder_length', 'nrn_center', 'nrn_scale'] (those are done above -> static_context_variable_selection)
+        # so len(embeddings_varying_encoder)=12 
+        # embeddings_varying_encoder.keys() = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 
+        # 'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+        # embeddings_varying_encoder['time_idx'].shape -> torch.Size([1, 30, 1])
         embeddings_varying_encoder = {
             name: input_vectors[name][:, :max_encoder_length] for name in self.encoder_variables
         }
+                # encoder_input_sizes -> {'dayofweek_cos': 8, 'dayofweek_sin': 8, 'ly_dayofweek_cos': 8, 
+        # 'ly_dayofweek_sin': 8, 'ly_month_cos': 8, 
+        # 'ly_month_sin': 8, 'ly_n_visitors': 8, 'ly_nrn': 8, 'month_cos': 8, 'month_sin': 8, 
+        # 'relative_time_idx': 8, 'time_idx': 8}
+        # 8 = self.hparams.hidden_continuous_size
+        # 
+        # len(encoder_input_sizes)=12
+        # self.hparams.hidden_size = 16
+        # input_embedding_flags = {}
+        # self.hparams.dropout = 0.1
+        # self.hparams.hidden_size = 16
+        # self.prescalers = ModuleDict(
+        #   (step): Linear(in_features=1, out_features=8, bias=True)
+        #   (encoder_length): Linear(in_features=1, out_features=8, bias=True)
+        #   (nrn_center): Linear(in_features=1, out_features=8, bias=True) ...
+        # self.encoder_variable_selection = VariableSelectionNetwork(
+        #     input_sizes=encoder_input_sizes,
+        #     hidden_size=self.hparams.hidden_size,
+        #     input_embedding_flags={name: True for name in self.hparams.time_varying_categoricals_encoder},
+        #     dropout=self.hparams.dropout,
+        #     context_size=self.hparams.hidden_size,
+        #     prescalers=self.prescalers,
+        #     single_variable_grns={}
+        #     if not self.hparams.share_single_variable_networks
+        #     else self.shared_single_variable_grns,
+        # )
         embeddings_varying_encoder, encoder_sparse_weights = self.encoder_variable_selection(
             embeddings_varying_encoder,
             static_context_variable_selection[:, :max_encoder_length],

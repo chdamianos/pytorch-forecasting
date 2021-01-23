@@ -13,7 +13,7 @@ from torch import distributions
 import torch.nn.functional as F
 from torch.nn.utils import rnn
 
-from pytorch_forecasting.utils import create_mask, unpack_sequence, unsqueeze_like
+from .utils import create_mask, unpack_sequence, unsqueeze_like
 
 
 class Metric(LightningMetric):

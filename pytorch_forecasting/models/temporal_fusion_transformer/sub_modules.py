@@ -323,23 +323,54 @@ class VariableSelectionNetwork(nn.Module):
         """
         if self.num_inputs > 1:
             # transform single variables
-            var_outputs = []
+            var_outputs_list = []
             weight_inputs = []
             for name in self.input_sizes.keys():
                 # select embedding belonging to a single input
+                """
+                x['market_id'].shape -> torch.Size([1, 16]) [batch, embedding_length]
+                x['step'].shape -> torch.Size([1, 1]) [batch, embedding_length]
+                """
                 variable_embedding = x[name]
                 if name in self.prescalers:
+                    """
+                    self.prescalers['step'] -> Linear(in_features=1, out_features=8, bias=True)
+                    where 8 => hidden_continuous_size
+                    no prescaler for categorical embedding only for static reals
+                    variable_embedding -> torch.Size([1, 8])
+                    """
                     variable_embedding = self.prescalers[name](variable_embedding)
                 weight_inputs.append(variable_embedding)
-                var_outputs.append(self.single_variable_grns[name](variable_embedding))
-            var_outputs = torch.stack(var_outputs, dim=-1)
+                # self.single_variable_grns['market_id'] -> ResampleNorm(input_size, hidden_size) -> ResampleNorm(16, 16)
+                # ResampleNorm for categorical embeddings
+                # -> torch.Size([1, 16]
+
+                # self.single_variable_grns['step'] ->
+                # GatedResidualNetwork(input_size, min(input_size, hidden_size), output_size=hidden_size, dropout=dropout) 
+                # for scalar statics 
+                # -> self.single_variable_grns['step'](self.prescalers['step'](x['step'])).shape -> torch.Size([1, 16])
+                var_outputs_list.append(self.single_variable_grns[name](variable_embedding))
+            # torch.stack(var_outputs_list, dim=-1).shape -> torch.Size([1, 16, 5])
+            var_outputs = torch.stack(var_outputs_list, dim=-1)
 
             # calculate variable weights
+            # weight_inputs[0].shape -> torch.Size([1, 16]) 
+            # weight_inputs[1].shape -> torch.Size([1, 8])
+            # flat_embedding-> torch.Size([1, 48]) (16+4*8)
             flat_embedding = torch.cat(weight_inputs, dim=-1)
+            # GatedResidualNetwork(self.input_size_total, min(self.hidden_size, self.num_inputs), self.num_inputs,
+            #                      self.dropout, residual=False)
+            # where self.input_size_total = (16+4*8), self.hidden_size=16 (hyperparameter), self.num_inputs (5)), 
+            # self.dropout=0.1
+            # sparse_weights -> torch.Size([1, 5]) 
             sparse_weights = self.flattened_grn(flat_embedding, context)
+            # sparse_weights -> torch.Size([1, 1, 5])
             sparse_weights = self.softmax(sparse_weights).unsqueeze(-2)
 
+            # var_outputs (torch.Size([1, 16, 5])) * sparse_weights (torch.Size([1, 1, 5]))
+            # outputs -> torch.Size([1, 16, 5])
             outputs = var_outputs * sparse_weights
+            # outputs.sum(dim=-1).shape 
             outputs = outputs.sum(dim=-1)
         else:  # for one input, do not perform variable selection but just encoding
             name = next(iter(self.single_variable_grns.keys()))

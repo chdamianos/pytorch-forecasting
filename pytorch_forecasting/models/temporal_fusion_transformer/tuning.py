@@ -18,9 +18,9 @@ import statsmodels.api as sm
 import torch
 from torch.utils.data import DataLoader
 
-from pytorch_forecasting import TemporalFusionTransformer
-from pytorch_forecasting.data import TimeSeriesDataSet
-from pytorch_forecasting.metrics import QuantileLoss
+from . import TemporalFusionTransformer
+from ...data import TimeSeriesDataSet
+from ...metrics import QuantileLoss
 
 optuna_logger = logging.getLogger("optuna")
 

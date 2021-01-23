@@ -1,23 +1,12 @@
-import numba
-import copy
-from pathlib import Path
-import warnings
 import gc
-import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
-import torch
 
-from pytorch_forecasting import Baseline, TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
-from pytorch_forecasting.metrics import SMAPE, PoissonLoss, QuantileLoss
-from pytorch_forecasting.models.temporal_fusion_transformer.tuning import optimize_hyperparameters
-
-from pytorch_forecasting.data.examples import get_stallion_data
-from pyspark.sql import SparkSession
-
+from pytorch_forecasting.metrics import QuantileLoss
 
 def preprocess(pdf: pd.DataFrame):
     pdf = pdf.drop(["step_raw", "demand_date"], axis=1)
@@ -27,16 +16,10 @@ def preprocess(pdf: pd.DataFrame):
     return pdf
 
 
-# spark = (SparkSession.builder
-#          .appName("app_name")
-#          .config("spark.driver.memory", "4g")
-#          .config("spark.driver.maxResultSize", "4g")
-#          .getOrCreate())
-# spark.sparkContext.setLogLevel('ERROR')
 
-data_location = "/Users/dchristophides/OneDrive - Expedia Group/brain/renewal/V2/data/fe2_small_sample_sdf/fe2_small_sample_sdf.parquet"
-# data_sdf = spark.read.parquet(data_location)
-data_pdf = pd.read_parquet(data_location)#toPandas()
+
+data_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/fe2_small_sample_sdf.parquet"
+data_pdf = pd.read_parquet(data_location)
 data_pdf = data_pdf.query("nrn!=-999")
 ratio_train = 0.7
 train_length = 30

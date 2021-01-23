@@ -17,9 +17,9 @@ import torch.nn as nn
 from torch.nn.utils import rnn
 from torch.utils.data.dataloader import DataLoader
 
-from pytorch_forecasting.data.encoders import EncoderNormalizer, MultiNormalizer, NaNLabelEncoder
-from pytorch_forecasting.data.timeseries import TimeSeriesDataSet
-from pytorch_forecasting.metrics import (
+from ...data.encoders import EncoderNormalizer, MultiNormalizer, NaNLabelEncoder
+from ...data.timeseries import TimeSeriesDataSet
+from ...metrics import (
     MAE,
     MAPE,
     MASE,

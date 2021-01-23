@@ -178,6 +178,7 @@ class ResampleNorm(nn.Module):
         output = self.norm(x)
         return output
 
+    
 hidden_continuous_size = 8 
 single_variable_grns = nn.ModuleDict()
 prescalers = nn.ModuleDict()
