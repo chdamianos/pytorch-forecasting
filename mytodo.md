@@ -18,9 +18,7 @@ def get_embedding_size(n: int, max_size: int = 100) -> int:
 ```
 
 # Left at 
-1. pytorch-forecasting/pytorch_forecasting/models/temporal_fusion_transformer/__init__.py:499
-2. pytorch-forecasting/pytorch_forecasting/models/temporal_fusion_transformer/sub_modules.py:338
- 
+find out about target normalisation (softplus?)
 # Embedding of categorical and static variables 
 ## categorical variables 
 for categorical variables we use nn.Embedding
