@@ -572,7 +572,7 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
         embeddings_varying_encoder = {
             name: input_vectors[name][:, :max_encoder_length] for name in self.encoder_variables
         }
-                # encoder_input_sizes -> {'dayofweek_cos': 8, 'dayofweek_sin': 8, 'ly_dayofweek_cos': 8, 
+        # encoder_input_sizes -> {'dayofweek_cos': 8, 'dayofweek_sin': 8, 'ly_dayofweek_cos': 8, 
         # 'ly_dayofweek_sin': 8, 'ly_month_cos': 8, 
         # 'ly_month_sin': 8, 'ly_n_visitors': 8, 'ly_nrn': 8, 'month_cos': 8, 'month_sin': 8, 
         # 'relative_time_idx': 8, 'time_idx': 8}
@@ -598,14 +598,27 @@ class TemporalFusionTransformer(BaseModelWithCovariates):
         #     if not self.hparams.share_single_variable_networks
         #     else self.shared_single_variable_grns,
         # )
+        # embeddings_varying_encoder-> torch.Size([1, 30, 16])
+        # encoder_sparse_weights-> torch.Size([1, 30, 1, 12])
         embeddings_varying_encoder, encoder_sparse_weights = self.encoder_variable_selection(
             embeddings_varying_encoder,
             static_context_variable_selection[:, :max_encoder_length],
         )
 
+        # len(self.decoder_variables)=12
+        #@property
+        # def decoder_variables(self) -> List[str]:
+        #     """List of all decoder variables in model (excluding static variables)"""
+        #     return self.hparams.time_varying_categoricals_decoder + self.hparams.time_varying_reals_decoder
+        # self.hparams.time_varying_categoricals_decoder = []
+        # self.hparams.time_varying_reals_decoder = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin', 
+        #  'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+        # embeddings_varying_decoder['time_idx'].shape -> torch.Size([1, 45, 1])
         embeddings_varying_decoder = {
             name: input_vectors[name][:, max_encoder_length:] for name in self.decoder_variables  # select decoder
         }
+        # embeddings_varying_decoder.shape -> torch.Size([1, 45, 16]) 
+        # decoder_sparse_weights.shape -> torch.Size([1, 45, 1, 12])
         embeddings_varying_decoder, decoder_sparse_weights = self.decoder_variable_selection(
             embeddings_varying_decoder,
             static_context_variable_selection[:, max_encoder_length:],
