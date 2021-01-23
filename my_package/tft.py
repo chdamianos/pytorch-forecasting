@@ -1,3 +1,6 @@
+from data import TimeSeriesDataSet , GroupNormalizer
+import pandas as pd
+import gc
 from rnn import LSTM
 from sub_modules import (
     AddNorm,
@@ -7,6 +10,7 @@ from sub_modules import (
     InterpretableMultiHeadAttention,
     VariableSelectionNetwork,
 )
+from nn import MultiEmbedding
 import torch
 from typing import List, Union, Dict, Tuple
 import torch.nn as nn
@@ -31,6 +35,21 @@ def QuantileLoss(y_pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 
 class Utils:
+    @staticmethod
+    def decoder_variables(hyperparams: HyperParameters) -> List[str]:
+        """List of all decoder variables in model (excluding static variables)"""
+        return hyperparams.time_varying_categoricals_decoder + hyperparams.time_varying_reals_decoder
+
+    @staticmethod
+    def encoder_variables(hyperparams: HyperParameters) -> List[str]:
+        """List of all encoder variables in model (excluding static variables)"""
+        return hyperparams.time_varying_categoricals_encoder + hyperparams.time_varying_reals_encoder
+
+    @staticmethod
+    def static_variables(hyperparams: HyperParameters) -> List[str]:
+        """List of all static variables in model"""
+        return hyperparams.static_categoricals + hyperparams.static_reals
+
     @staticmethod
     def reals(hyperparams: HyperParameters) -> List[str]:
         """List of all continuous variables in model"""
@@ -66,6 +85,7 @@ class Utils:
 class TemporalFusionTransformer(nn.Module):
     def __init__(
         self,
+        device,
         hidden_size: int = 16,
         lstm_layers: int = 1,
         dropout: float = 0.1,
@@ -170,6 +190,7 @@ class TemporalFusionTransformer(nn.Module):
             **kwargs: additional arguments to :py:class:`~BaseModel`.
         """
         super().__init__()
+        self.device = device
         if loss is None:
             loss = QuantileLoss
         # processing inputs
@@ -181,9 +202,13 @@ class TemporalFusionTransformer(nn.Module):
         (embeddings): ModuleDict(
             (market_id): Embedding(1801, 16)))
         """
-        self.input_embeddings = nn.ModuleDict()
-        for k, v in HyperParameters.embedding_sizes.items():
-            self.input_embeddings[k] = nn.Embedding(v[0], v[1])
+        self.input_embeddings = MultiEmbedding(
+            embedding_sizes=HyperParameters.embedding_sizes,
+            categorical_groups=HyperParameters.categorical_groups,
+            embedding_paddings=HyperParameters.embedding_paddings,
+            x_categoricals=HyperParameters.x_categoricals,
+            max_embedding_size=HyperParameters.hidden_size,
+        )
 
         # continuous variable processing for every real, even if static
         self.prescalers = nn.ModuleDict(
@@ -370,6 +395,12 @@ class TemporalFusionTransformer(nn.Module):
         )
         return mask
 
+    def expand_static_context(self, context, timesteps):
+        """
+        add time dimension to static context
+        """
+        return context[:, None].expand(-1, timesteps, -1)
+
     def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         input dimensions: n_samples x time x variables
@@ -404,21 +435,19 @@ class TemporalFusionTransformer(nn.Module):
         """
         uses nn.Embedding() it's 16 not 100 because of a variable `max_embedding_size` (probably based on hidden_size) 
         """
-        # todo fix 
-        input_vectors = {}
-        for k, v in self.input_embeddings.items():
-            input_vectors[k] = v(x_cat).squeeze(2)
+        # todo fix
+        input_vectors = self.input_embeddings(x_cat)
         input_vectors.update(
             {
                 name: x_cont[..., idx].unsqueeze(-1)
                 for idx, name in enumerate(HyperParameters.x_reals)
-                if name in HyperParameters.reals
+                if name in Utils.reals(HyperParameters)
             }
         )
 
         # Embedding and variable selection
-        if len(self.static_variables) > 0:
-            static_embedding = {name: input_vectors[name][:, 0] for name in self.static_variables}
+        if len(Utils.static_variables(HyperParameters)) > 0:
+            static_embedding = {name: input_vectors[name][:, 0] for name in Utils.static_variables(HyperParameters)}
             static_embedding, static_variable_selection = self.static_variable_selection(static_embedding)
         else:
             static_embedding = torch.zeros(
@@ -430,7 +459,7 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         embeddings_varying_encoder = {
-            name: input_vectors[name][:, :max_encoder_length] for name in self.encoder_variables
+            name: input_vectors[name][:, :max_encoder_length] for name in Utils.encoder_variables(HyperParameters)
         }
         embeddings_varying_encoder, encoder_sparse_weights = self.encoder_variable_selection(
             embeddings_varying_encoder,
@@ -438,7 +467,7 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         embeddings_varying_decoder = {
-            name: input_vectors[name][:, max_encoder_length:] for name in self.decoder_variables  # select decoder
+            name: input_vectors[name][:, max_encoder_length:] for name in Utils.decoder_variables(HyperParameters)  # select decoder
         }
         embeddings_varying_decoder, decoder_sparse_weights = self.decoder_variable_selection(
             embeddings_varying_decoder,
@@ -517,16 +546,13 @@ class TemporalFusionTransformer(nn.Module):
         )
 
 
-import gc
-import pandas as pd
-from data import TimeSeriesDataSet ,GroupNormalizer
-
 def preprocess(pdf: pd.DataFrame):
     pdf = pdf.drop(["step_raw", "demand_date"], axis=1)
     pdf = pdf.rename(columns={"time_index": "time_idx"})
     pdf = pdf.assign(**{'market_id': pdf['market_id'].astype("str")})
     pdf = pdf.fillna(0)
     return pdf
+
 
 data_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/fe2_small_sample_sdf.parquet"
 data_pdf = pd.read_parquet(data_location)
@@ -606,6 +632,6 @@ for batch in train_dataloader:
     y = y[0]
     break
 
-model = TemporalFusionTransformer()
+model = TemporalFusionTransformer(device='cpu')
 model(x)
-a=1
+a = 1
