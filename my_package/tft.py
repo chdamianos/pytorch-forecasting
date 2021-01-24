@@ -1,3 +1,4 @@
+from torch._C import device
 from data import TimeSeriesDataSet , GroupNormalizer
 import pandas as pd
 import gc
@@ -81,6 +82,44 @@ class Utils:
         else:  # return where no values are
             return torch.arange(size, device=lengths.device).unsqueeze(0) >= lengths.unsqueeze(-1)
 
+    @staticmethod
+    def get_attention_mask(encoder_lengths: torch.LongTensor, decoder_length: int, device):
+        """
+        Returns causal mask to apply for self-attention layer.
+
+        Args:
+            self_attn_inputs: Inputs to self attention layer to determine mask shape
+        """
+        # indices to which is attended
+        attend_step = torch.arange(decoder_length, device=device)
+        # indices for which is predicted
+        predict_step = torch.arange(0, decoder_length, device=device)[:, None]
+        # do not attend to steps to self or after prediction
+        # todo: there is potential value in attending to future forecasts if they are made with knowledge currently
+        #   available
+        #   one possibility is here to use a second attention layer for future attention (assuming different effects
+        #   matter in the future than the past)
+        #   or alternatively using the same layer but allowing forward attention - i.e. only masking out non-available
+        #   data and self
+        decoder_mask = attend_step >= predict_step
+        # do not attend to steps where data is padded
+        encoder_mask = Utils.create_mask(encoder_lengths.max(), encoder_lengths)
+        # combine masks along attended time - first encoder and then decoder
+        mask = torch.cat(
+            (
+                encoder_mask.unsqueeze(1).expand(-1, decoder_length, -1),
+                decoder_mask.unsqueeze(0).expand(encoder_lengths.size(0), -1, -1),
+            ),
+            dim=2,
+        )
+        return mask
+
+    @staticmethod
+    def expand_static_context(context, timesteps):
+        """
+        add time dimension to static context
+        """
+        return context[:, None].expand(-1, timesteps, -1)
 
 class TemporalFusionTransformer(nn.Module):
     def __init__(
@@ -211,9 +250,11 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # continuous variable processing for every real, even if static
+        # hidden_continuous_sizes -> custom/specific embedding size 
+        # hidden_continuous_size -> default 
         self.prescalers = nn.ModuleDict(
             {
-                name: nn.Linear(1, HyperParameters.hidden_continuous_size)
+                name: nn.Linear(1, HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size))
                 for name in Utils.reals(HyperParameters)
             }
         )
@@ -223,7 +264,7 @@ class TemporalFusionTransformer(nn.Module):
                               for name in HyperParameters.static_categoricals}
         static_input_sizes.update(
             {
-                name: HyperParameters.hidden_continuous_size
+                name: HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size)
                 for name in HyperParameters.static_reals
             }
         )
@@ -240,18 +281,9 @@ class TemporalFusionTransformer(nn.Module):
         }
         encoder_input_sizes.update(
             {
-                name: HyperParameters.hidden_continuous_size
+                name: HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size)
                 for name in HyperParameters.time_varying_reals_encoder
             }
-        )
-        self.encoder_variable_selection = VariableSelectionNetwork(
-            input_sizes=encoder_input_sizes,
-            hidden_size=HyperParameters.hidden_size,
-            input_embedding_flags={name: True for name in HyperParameters.time_varying_categoricals_encoder},
-            dropout=HyperParameters.dropout,
-            context_size=HyperParameters.hidden_size,
-            prescalers=self.prescalers,
-            single_variable_grns={},
         )
         # variable selection for decoder
         decoder_input_sizes = {
@@ -259,9 +291,38 @@ class TemporalFusionTransformer(nn.Module):
         }
         decoder_input_sizes.update(
             {
-                name: HyperParameters.hidden_continuous_size
+                name: HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size)
                 for name in HyperParameters.time_varying_reals_decoder
             }
+        )
+        # create single variable grns that are shared across decoder and encoder
+        if HyperParameters.share_single_variable_networks:
+            self.shared_single_variable_grns = nn.ModuleDict()
+            for name, input_size in encoder_input_sizes.items():
+                self.shared_single_variable_grns[name] = GatedResidualNetwork(
+                    input_size,
+                    min(input_size, HyperParameters.hidden_size),
+                    HyperParameters.hidden_size,
+                    HyperParameters.dropout,
+                )
+            for name, input_size in decoder_input_sizes.items():
+                if name not in self.shared_single_variable_grns:
+                    self.shared_single_variable_grns[name] = GatedResidualNetwork(
+                        input_size,
+                        min(input_size, HyperParameters.hidden_size),
+                        HyperParameters.hidden_size,
+                        HyperParameters.dropout,
+                    )
+        self.encoder_variable_selection = VariableSelectionNetwork(
+            input_sizes=encoder_input_sizes,
+            hidden_size=HyperParameters.hidden_size,
+            input_embedding_flags={name: True for name in HyperParameters.time_varying_categoricals_encoder},
+            dropout=HyperParameters.dropout,
+            context_size=HyperParameters.hidden_size,
+            prescalers=self.prescalers,
+            single_variable_grns={}            
+            if not HyperParameters.share_single_variable_networks
+            else self.shared_single_variable_grns,
         )
         self.decoder_variable_selection = VariableSelectionNetwork(
             input_sizes=decoder_input_sizes,
@@ -270,7 +331,9 @@ class TemporalFusionTransformer(nn.Module):
             dropout=HyperParameters.dropout,
             context_size=HyperParameters.hidden_size,
             prescalers=self.prescalers,
-            single_variable_grns={},
+            single_variable_grns={}
+            if not HyperParameters.share_single_variable_networks
+            else self.shared_single_variable_grns,
         )
 
         # static encoders
@@ -364,42 +427,7 @@ class TemporalFusionTransformer(nn.Module):
         else:
             self.output_layer = nn.Linear(HyperParameters.hidden_size, HyperParameters.output_size)
 
-    def get_attention_mask(self, encoder_lengths: torch.LongTensor, decoder_length: int):
-        """
-        Returns causal mask to apply for self-attention layer.
 
-        Args:
-            self_attn_inputs: Inputs to self attention layer to determine mask shape
-        """
-        # indices to which is attended
-        attend_step = torch.arange(decoder_length, device=self.device)
-        # indices for which is predicted
-        predict_step = torch.arange(0, decoder_length, device=self.device)[:, None]
-        # do not attend to steps to self or after prediction
-        # todo: there is potential value in attending to future forecasts if they are made with knowledge currently
-        #   available
-        #   one possibility is here to use a second attention layer for future attention (assuming different effects
-        #   matter in the future than the past)
-        #   or alternatively using the same layer but allowing forward attention - i.e. only masking out non-available
-        #   data and self
-        decoder_mask = attend_step >= predict_step
-        # do not attend to steps where data is padded
-        encoder_mask = Utils.create_mask(encoder_lengths.max(), encoder_lengths)
-        # combine masks along attended time - first encoder and then decoder
-        mask = torch.cat(
-            (
-                encoder_mask.unsqueeze(1).expand(-1, decoder_length, -1),
-                decoder_mask.unsqueeze(0).expand(encoder_lengths.size(0), -1, -1),
-            ),
-            dim=2,
-        )
-        return mask
-
-    def expand_static_context(self, context, timesteps):
-        """
-        add time dimension to static context
-        """
-        return context[:, None].expand(-1, timesteps, -1)
 
     def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -454,7 +482,7 @@ class TemporalFusionTransformer(nn.Module):
                 (x_cont.size(0), HyperParameters.hidden_size), dtype=self.dtype, device=self.device
             )
             static_variable_selection = torch.zeros((x_cont.size(0), 0), dtype=self.dtype, device=self.device)
-        static_context_variable_selection = self.expand_static_context(
+        static_context_variable_selection = Utils.expand_static_context(
             self.static_context_variable_selection(static_embedding), timesteps
         )
 
@@ -506,7 +534,7 @@ class TemporalFusionTransformer(nn.Module):
         # static enrichment
         static_context_enrichment = self.static_context_enrichment(static_embedding)
         attn_input = self.static_enrichment(
-            lstm_output, self.expand_static_context(static_context_enrichment, timesteps)
+            lstm_output, Utils.expand_static_context(static_context_enrichment, timesteps)
         )
 
         # Attention
@@ -514,8 +542,8 @@ class TemporalFusionTransformer(nn.Module):
             q=attn_input[:, max_encoder_length:],  # query only for predictions
             k=attn_input,
             v=attn_input,
-            mask=self.get_attention_mask(
-                encoder_lengths=encoder_lengths, decoder_length=timesteps - max_encoder_length
+            mask=Utils.get_attention_mask(
+                encoder_lengths=encoder_lengths, decoder_length=timesteps - max_encoder_length, device=self.device
             ),
         )
 
@@ -632,6 +660,6 @@ for batch in train_dataloader:
     y = y[0]
     break
 
-model = TemporalFusionTransformer(device='cpu')
-model(x)
+model = TemporalFusionTransformer(device=torch.device('cpu'))
+out=model(x)
 a = 1

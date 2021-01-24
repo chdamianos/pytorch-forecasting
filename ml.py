@@ -8,14 +8,13 @@ from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.data import GroupNormalizer
 from pytorch_forecasting.metrics import QuantileLoss
 
+
 def preprocess(pdf: pd.DataFrame):
     pdf = pdf.drop(["step_raw", "demand_date"], axis=1)
     pdf = pdf.rename(columns={"time_index": "time_idx"})
     pdf = pdf.assign(**{'market_id': pdf['market_id'].astype("str")})
     pdf = pdf.fillna(0)
     return pdf
-
-
 
 
 data_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/fe2_small_sample_sdf.parquet"
@@ -89,8 +88,8 @@ prediction = TimeSeriesDataSet(
 
 # create dataloaders for model
 batch_size = 128  # set this between 32 to 128
-train_dataloader = training.to_dataloader(train=True, batch_size=1, num_workers=0)
-val_dataloader = prediction.to_dataloader(train=False, batch_size=1, num_workers=0)
+train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
+val_dataloader = prediction.to_dataloader(train=False, batch_size=batch_size * 10, num_workers=0)
 
 # configure network and trainer
 early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=10, verbose=False, mode="min")
@@ -98,11 +97,11 @@ lr_logger = LearningRateMonitor()  # log the learning rate
 logger = TensorBoardLogger("lightning_logs")  # logging results to a tensorboard
 
 trainer = pl.Trainer(
-    max_epochs=10,
+    max_epochs=1,  # 10
     gpus=0,
     weights_summary="top",
     gradient_clip_val=0.1,
-    limit_train_batches=30,  # coment in for training, running valiation every 30 batches
+    limit_train_batches=1,  # 30 coment in for training, running valiation every 30 batches
     # fast_dev_run=True,  # comment in to check that networkor dataset has no serious bugs
     callbacks=[lr_logger, early_stop_callback],
     logger=logger,
@@ -128,3 +127,5 @@ trainer.fit(
     train_dataloader=train_dataloader,
     val_dataloaders=val_dataloader,
 )
+tft.predict(val_dataloader)
+a = 1

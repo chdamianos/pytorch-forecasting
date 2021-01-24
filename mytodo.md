@@ -18,7 +18,9 @@ def get_embedding_size(n: int, max_size: int = 100) -> int:
 ```
 
 # Left at 
-find out about target normalisation (softplus?)
+* output is standardized ((x-mu)/std) and also a softplus is applied to it after
+  * try x/x.max() and also trainable softplus output activation??
+  * have a look at the code to understand if target is normalized
 # Embedding of categorical and static variables 
 ## categorical variables 
 for categorical variables we use nn.Embedding
