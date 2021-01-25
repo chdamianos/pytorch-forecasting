@@ -39,7 +39,8 @@ class HyperParameters:
     reduce_on_plateau_min_lr = 1e-05
     weight_decay: 0.0
     optimizer = 'ranger'
-    embedding_labels_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/embedding_labels.pickle"
+    # embedding_labels_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/embedding_labels.pickle"
+    embedding_labels_location = "/Users/dchristophides/OneDrive - Expedia Group/brain/renewal/V2/data/embedding_labels.pickle"
     with open(embedding_labels_location, 'rb') as f:
         embedding_labels = pickle.load(f)
 
