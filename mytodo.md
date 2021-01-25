@@ -18,6 +18,7 @@ def get_embedding_size(n: int, max_size: int = 100) -> int:
 ```
 
 # Left at 
+* pytorch-forecasting/my_package/tft_2.py:498
 * output is standardized ((x-mu)/std) and also a softplus is applied to it after
   * try x/x.max() and also trainable softplus output activation??
   * have a look at the code to understand if target is normalized
