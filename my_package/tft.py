@@ -1,5 +1,7 @@
+import copy
+
 from torch._C import device
-from data import TimeSeriesDataSet , GroupNormalizer
+from data import TimeSeriesDataSet, GroupNormalizer
 import pandas as pd
 import gc
 from rnn import LSTM
@@ -121,41 +123,42 @@ class Utils:
         """
         return context[:, None].expand(-1, timesteps, -1)
 
+
 class TemporalFusionTransformer(nn.Module):
     def __init__(
-        self,
-        device,
-        hidden_size: int = 16,
-        lstm_layers: int = 1,
-        dropout: float = 0.1,
-        output_size: Union[int, List[int]] = 7,
-        n_targets: int = 1,
-        loss=None,
-        attention_head_size: int = 4,
-        max_encoder_length: int = 10,
-        static_categoricals: List[str] = [],
-        static_reals: List[str] = [],
-        time_varying_categoricals_encoder: List[str] = [],
-        time_varying_categoricals_decoder: List[str] = [],
-        categorical_groups: Dict[str, List[str]] = {},
-        time_varying_reals_encoder: List[str] = [],
-        time_varying_reals_decoder: List[str] = [],
-        x_reals: List[str] = [],
-        x_categoricals: List[str] = [],
-        hidden_continuous_size: int = 8,
-        hidden_continuous_sizes: Dict[str, int] = {},
-        embedding_sizes: Dict[str, Tuple[int, int]] = {},
-        embedding_paddings: List[str] = [],
-        embedding_labels: Dict[str, np.ndarray] = {},
-        learning_rate: float = 1e-3,
-        log_interval: Union[int, float] = -1,
-        log_val_interval: Union[int, float] = None,
-        log_gradient_flow: bool = False,
-        reduce_on_plateau_patience: int = 1000,
-        monotone_constaints: Dict[str, int] = {},
-        share_single_variable_networks: bool = False,
-        logging_metrics: nn.ModuleList = None,
-        **kwargs,
+            self,
+            device,
+            hidden_size: int = 16,
+            lstm_layers: int = 1,
+            dropout: float = 0.1,
+            output_size: Union[int, List[int]] = 7,
+            n_targets: int = 1,
+            loss=None,
+            attention_head_size: int = 4,
+            max_encoder_length: int = 10,
+            static_categoricals: List[str] = [],
+            static_reals: List[str] = [],
+            time_varying_categoricals_encoder: List[str] = [],
+            time_varying_categoricals_decoder: List[str] = [],
+            categorical_groups: Dict[str, List[str]] = {},
+            time_varying_reals_encoder: List[str] = [],
+            time_varying_reals_decoder: List[str] = [],
+            x_reals: List[str] = [],
+            x_categoricals: List[str] = [],
+            hidden_continuous_size: int = 8,
+            hidden_continuous_sizes: Dict[str, int] = {},
+            embedding_sizes: Dict[str, Tuple[int, int]] = {},
+            embedding_paddings: List[str] = [],
+            embedding_labels: Dict[str, np.ndarray] = {},
+            learning_rate: float = 1e-3,
+            log_interval: Union[int, float] = -1,
+            log_val_interval: Union[int, float] = None,
+            log_gradient_flow: bool = False,
+            reduce_on_plateau_patience: int = 1000,
+            monotone_constaints: Dict[str, int] = {},
+            share_single_variable_networks: bool = False,
+            logging_metrics: nn.ModuleList = None,
+            **kwargs,
     ):
         """
         Temporal Fusion Transformer for forecasting timeseries - use its :py:meth:`~from_dataset` method if possible.
@@ -320,7 +323,7 @@ class TemporalFusionTransformer(nn.Module):
             dropout=HyperParameters.dropout,
             context_size=HyperParameters.hidden_size,
             prescalers=self.prescalers,
-            single_variable_grns={}            
+            single_variable_grns={}
             if not HyperParameters.share_single_variable_networks
             else self.shared_single_variable_grns,
         )
@@ -427,43 +430,43 @@ class TemporalFusionTransformer(nn.Module):
         else:
             self.output_layer = nn.Linear(HyperParameters.hidden_size, HyperParameters.output_size)
 
-
-
     def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
         input dimensions: n_samples x time x variables
-        x.keys() -> ['encoder_cat', 'encoder_cont', 'encoder_target', 'encoder_lengths', 'decoder_cat', 'decoder_cont', 'decoder_target', 'decoder_lengths', 'decoder_time_idx', 'groups', 'target_scale']
+        x.keys() -> ['encoder_cat', 'encoder_cont', 'encoder_target', 'encoder_lengths', 'decoder_cat', 'decoder_cont', 'decoder_target',
+        'decoder_lengths', 'decoder_time_idx', 'groups', 'target_scale']
+
         x['encoder_cat'].shape -> [batch, encoder_length, number_of_cat_features] e.g. [1, 30, 1]
         x['encoder_cont'].shape -> [1, 30, 16] -> real features normalized ['step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
             'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
-        x['encoder_target'].shape ->  [1, 30] -> target in the encoder part (e.g. nrn) -> e.g. tensor([[12.,  5.,  9.,  8.,  3.,  8.,  9., 10., 10.,  7.,  5.,  2.,  7.,  5.,
-          5.,  6.,  3.,  2.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,
-          0.,  0.]]) looks like un-normalized
         x['encoder_lengths'] -> tensor([30])
+
         x['decoder_cat'].shape -> batch, encoder_length, 1] e.g. [1, 45, 1], same as encoder_cat but for the length of the decoder e.g. tensor([[[89],[89],...]])
         x['decoder_cont'].shape -> [1, 45, 16] -> same as encoder_cont but for the length of the decoder
-        x['decoder_target'].shape -> torch.Size([1, 45])
         x['decoder_lengths'] -> tensor([45])
-        x['decoder_time_idx'] -> torch.Size([1, 45]) -> tensor([[30, 31, ..., 74]])
-        x['groups'] -> tensor([[0]])
-        x['target_scale'] -> tensor([[4.1467, 4.8231]])
         """
+        xcopy = copy.deepcopy(x)
+        keep_keys = ["encoder_lengths", "decoder_lengths", "encoder_cat", "decoder_cat", "encoder_cont", "decoder_cont"]
+        x = {your_key: xcopy[your_key] for your_key in keep_keys}
 
+        # tensor([30])->torch.Size([1])
         encoder_lengths = x["encoder_lengths"]
+        # tensor([45])->torch.Size([1])
         decoder_lengths = x["decoder_lengths"]
         # x_cat -> torch.Size([1, 75, 1])
         x_cat = torch.cat([x["encoder_cat"], x["decoder_cat"]], dim=1)  # concatenate in time dimension
         # x_cont -> torch.Size([1, 75, 16])
         x_cont = torch.cat([x["encoder_cont"], x["decoder_cont"]], dim=1)  # concatenate in time dimension
-        # timesteps
+        # timesteps = 75
         timesteps = x_cont.size(1)  # encode + decode length
-        # max_encoder_length
+        # max_encoder_length = 30
         max_encoder_length = int(encoder_lengths.max())
-        # input_vectors['market_id'].shape torch.Size([1, 75, 16])
-        """
-        uses nn.Embedding() it's 16 not 100 because of a variable `max_embedding_size` (probably based on hidden_size) 
-        """
-        # todo fix
+        # input_vectors.keys() -> len(input_vectors.keys()) = 17
+        # ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos',
+        # 'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+        # input_vectors['step'].shape -> torch.Size([1, 75, 1])
+        # input_vectors['market_id'].shape -> torch.Size([1, 75, 16])
+        # input_vectors['time_idx'].shape -> torch.Size([1, 75, 1])
         input_vectors = self.input_embeddings(x_cat)
         input_vectors.update(
             {
@@ -474,6 +477,9 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # Embedding and variable selection
+        # static_embedding.shape -> torch.Size([1, 18]) 18 -> hidden_size
+        # static_variable_selection.shape -> torch.Size([1, 1, 5])
+        # ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale']
         if len(Utils.static_variables(HyperParameters)) > 0:
             static_embedding = {name: input_vectors[name][:, 0] for name in Utils.static_variables(HyperParameters)}
             static_embedding, static_variable_selection = self.static_variable_selection(static_embedding)
@@ -482,18 +488,32 @@ class TemporalFusionTransformer(nn.Module):
                 (x_cont.size(0), HyperParameters.hidden_size), dtype=self.dtype, device=self.device
             )
             static_variable_selection = torch.zeros((x_cont.size(0), 0), dtype=self.dtype, device=self.device)
+        # static_context_variable_selection.shape -> torch.Size([1, 75, 18])
         static_context_variable_selection = Utils.expand_static_context(
             self.static_context_variable_selection(static_embedding), timesteps
         )
-
+        # These are real variable that do vary with time, so out of 16 real there are four statics whose embeddings were calculated above
+        # (['step', 'encoder_length', 'nrn_center', 'nrn_scale'])
+        # Utils.encoder_variables(HyperParameters) -> ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors', 'ly_nrn',
+        # 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin',  'ly_month_cos', 'relative_time_idx']
+        # len(Utils.encoder_variables(HyperParameters)) -> 12
+        # len(embeddings_varying_encoder.keys()) -> 12
+        # {k:v.shape for k,v in embeddings_varying_encoder.items()} -> {'time_idx': torch.Size([1, 30, 1]),  'dayofweek_sin': torch.Size([1, 30, 1]),
+        #  'dayofweek_cos': torch.Size([1, 30, 1]), 'month_sin': torch.Size([1, 30, 1]), 'month_cos': torch.Size([1, 30, 1]),
+        #  'ly_n_visitors': torch.Size([1, 30, 1]), 'ly_nrn': torch.Size([1, 30, 1]), 'ly_dayofweek_sin': torch.Size([1, 30, 1]),
+        #  'ly_dayofweek_cos': torch.Size([1, 30, 1]), 'ly_month_sin': torch.Size([1, 30, 1]),
+        #  'ly_month_cos': torch.Size([1, 30, 1]), 'relative_time_idx': torch.Size([1, 30, 1])}
         embeddings_varying_encoder = {
             name: input_vectors[name][:, :max_encoder_length] for name in Utils.encoder_variables(HyperParameters)
         }
+        # embeddings_varying_encoder.shape -> torch.Size([1, 30, 18]) [batch, encoder_length, hidden_size]
+        # encoder_sparse_weights.shape -> torch.Size([1, 30, 1, 12])[batch, encoder_length, 1, number_of_variables]
         embeddings_varying_encoder, encoder_sparse_weights = self.encoder_variable_selection(
             embeddings_varying_encoder,
             static_context_variable_selection[:, :max_encoder_length],
         )
-
+        # embeddings_varying_decoder.shape -> torch.Size([1, 45, 18]) [batch, encoder_length, hidden_size]
+        # decoder_sparse_weights.shape -> torch.Size([1, 45, 1, 12])[batch, encoder_length, 1, number_of_variables]
         embeddings_varying_decoder = {
             name: input_vectors[name][:, max_encoder_length:] for name in Utils.decoder_variables(HyperParameters)  # select decoder
         }
@@ -504,17 +524,23 @@ class TemporalFusionTransformer(nn.Module):
 
         # LSTM
         # calculate initial state
+        # input_hidden.shape -> torch.Size([1, 1, 18])
         input_hidden = self.static_context_initial_hidden_lstm(static_embedding).expand(
             HyperParameters.lstm_layers, -1, -1
         )
+        # input_cell.shape -> torch.Size([1, 1, 18])
         input_cell = self.static_context_initial_cell_lstm(static_embedding).expand(HyperParameters.lstm_layers, -1, -1)
 
         # run local encoder
+        # encoder_output.shape -> torch.Size([1, 30, 18])
+        # hidden.shape -> torch.Size([1, 1, 18])
+        # input_cell.shape -> torch.Size([1, 1, 18])
         encoder_output, (hidden, cell) = self.lstm_encoder(
             embeddings_varying_encoder, (input_hidden, input_cell), lengths=encoder_lengths, enforce_sorted=False
         )
 
         # run local decoder
+        # decoder_output.shape  -> torch.Size([1, 45, 18])
         decoder_output, _ = self.lstm_decoder(
             embeddings_varying_decoder,
             (hidden, cell),
@@ -523,21 +549,27 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # skip connection over lstm
+        # lstm_output_encoder.shape -> torch.Size([1, 30, 18])
         lstm_output_encoder = self.post_lstm_gate_encoder(encoder_output)
         lstm_output_encoder = self.post_lstm_add_norm_encoder(lstm_output_encoder, embeddings_varying_encoder)
-
+        # lstm_output_decoder.shape -> torch.Size([1, 45, 18])
         lstm_output_decoder = self.post_lstm_gate_decoder(decoder_output)
         lstm_output_decoder = self.post_lstm_add_norm_decoder(lstm_output_decoder, embeddings_varying_decoder)
-
+        # lstm_output.shape -> torch.Size([1, 75, 18])
         lstm_output = torch.cat([lstm_output_encoder, lstm_output_decoder], dim=1)
 
         # static enrichment
+        # static_context_enrichment.shape -> torch.Size([1, 18])
+        # attn_input.shape -> torch.Size([1, 75, 18])
         static_context_enrichment = self.static_context_enrichment(static_embedding)
         attn_input = self.static_enrichment(
             lstm_output, Utils.expand_static_context(static_context_enrichment, timesteps)
         )
 
         # Attention
+        # attn_input[:, max_encoder_length:].shape -> torch.Size([1, 45, 18])
+        # attn_output.shape -> torch.Size([1, 45, 18])
+        # attn_output.shape -> torch.Size([1, 45, 1, 75])
         attn_output, attn_output_weights = self.multihead_attn(
             q=attn_input[:, max_encoder_length:],  # query only for predictions
             k=attn_input,
@@ -548,16 +580,19 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # skip connection over attention
+        # attn_output.shape -> torch.Size([1, 45, 18])
         attn_output = self.post_attn_gate_norm(attn_output, attn_input[:, max_encoder_length:])
-
+        # output.shape -> torch.Size([1, 45, 18])
         output = self.pos_wise_ff(attn_output)
 
         # skip connection over temporal fusion decoder (not LSTM decoder despite the LSTM output contains
         # a skip from the variable selection network)
+        # output.shape -> torch.Size([1, 45, 18])
         output = self.pre_output_gate_norm(output, lstm_output[:, max_encoder_length:])
         if HyperParameters.n_targets > 1:  # if to use multi-target architecture
             output = [output_layer(output) for output_layer in self.output_layer]
         else:
+            # output.shape -> torch.Size([1, 45, 7])
             output = self.output_layer(output)
 
         return dict(
@@ -567,10 +602,7 @@ class TemporalFusionTransformer(nn.Module):
             encoder_variables=encoder_sparse_weights,
             decoder_variables=decoder_sparse_weights,
             decoder_lengths=decoder_lengths,
-            encoder_lengths=encoder_lengths,
-            groups=x["groups"],
-            decoder_time_idx=x["decoder_time_idx"],
-            target_scale=x["target_scale"],
+            encoder_lengths=encoder_lengths
         )
 
 
@@ -655,12 +687,11 @@ batch_size = 128  # set this between 32 to 128
 train_dataloader = training.to_dataloader(train=True, batch_size=1, num_workers=0)
 val_dataloader = prediction.to_dataloader(train=False, batch_size=1, num_workers=0)
 
-
 for batch in train_dataloader:
     x, y = batch
     y = y[0]
     break
 
 model = TemporalFusionTransformer(device=torch.device('cpu'))
-out=model(x)
+out = model(x)
 a = 1

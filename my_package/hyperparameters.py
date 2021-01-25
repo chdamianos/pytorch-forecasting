@@ -1,6 +1,6 @@
 import pickle 
 class HyperParameters:
-    hidden_size = 16
+    hidden_size = 18
     lstm_layers = 1
     dropout = 0.1
     output_size = 7

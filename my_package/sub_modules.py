@@ -338,6 +338,10 @@ class VariableSelectionNetwork(nn.Module):
                     where 8 => hidden_continuous_size
                     no prescaler for categorical embedding only for static reals
                     variable_embedding -> torch.Size([1, 8])
+                    
+                    also for time varying features like time_idx (shape -> torch.Size([1, 30, 1]))
+                    an embedding is created with prescaler->Linear(in_features=1, out_features=8, bias=True)
+                    self.prescalers[name](variable_embedding) -> torch.Size([1, 30, 8])
                     """
                     variable_embedding = self.prescalers[name](variable_embedding)
                 weight_inputs.append(variable_embedding)
@@ -350,25 +354,38 @@ class VariableSelectionNetwork(nn.Module):
                 # for scalar statics 
                 # -> self.single_variable_grns['step'](self.prescalers['step'](x['step'])).shape -> torch.Size([1, 16])
                 var_outputs_list.append(self.single_variable_grns[name](variable_embedding))
-            # torch.stack(var_outputs_list, dim=-1).shape -> torch.Size([1, 16, 5])
+            # torch.stack(var_outputs_list, dim=-1).shape -> torch.Size([1, 18, 5]) -> [batch, hidden_size, number_of_variables]
+            # for time varying features torch.stack(var_outputs_list, dim=-1).shape -> torch.Size([1, 30, 18, 12]) [batch, number_of_time_steps, hidden_size, number_of_variables]
+            # NOTE: 16 refers to hidden size NOT number of real variables
             var_outputs = torch.stack(var_outputs_list, dim=-1)
 
             # calculate variable weights
             # weight_inputs[0].shape -> torch.Size([1, 16]) 
             # weight_inputs[1].shape -> torch.Size([1, 8])
             # flat_embedding-> torch.Size([1, 48]) (16+4*8)
+
+            # for time varying embeddings
+            # weight_inputs[0].shape -> torch.Size([1, 30, 8])
+            # weight_inputs[1].shape -> torch.Size([1, 30, 8]) ...
+            # torch.cat(weight_inputs, dim=-1).shape -> torch.Size([1, 30, 96]) 96=len(weight_inputs)*8=12*8=number_of_variables*continuous_hidden_size
             flat_embedding = torch.cat(weight_inputs, dim=-1)
             # GatedResidualNetwork(self.input_size_total, min(self.hidden_size, self.num_inputs), self.num_inputs,
             #                      self.dropout, residual=False)
             # where self.input_size_total = (16+4*8), self.hidden_size=16 (hyperparameter), self.num_inputs (5)), 
             # self.dropout=0.1
-            # sparse_weights -> torch.Size([1, 5]) 
+            # sparse_weights -> torch.Size([1, 5])
+
+            # for time varying features
+            # sparse_weights ->  torch.Size([1, 30, 12])
             sparse_weights = self.flattened_grn(flat_embedding, context)
             # sparse_weights -> torch.Size([1, 1, 5])
+            # torch.Size([1, 30, 1, 12]) for time varying
             sparse_weights = self.softmax(sparse_weights).unsqueeze(-2)
 
-            # var_outputs (torch.Size([1, 16, 5])) * sparse_weights (torch.Size([1, 1, 5]))
-            # outputs -> torch.Size([1, 16, 5])
+            # var_outputs (torch.Size([1, 18, 5])) * sparse_weights (torch.Size([1, 1, 5]))
+            # outputs -> torch.Size([1, 18, 5])
+
+            # time varying reals torch.Size([1, 30, 18, 12])
             outputs = var_outputs * sparse_weights
             # outputs.sum(dim=-1).shape 
             outputs = outputs.sum(dim=-1)
