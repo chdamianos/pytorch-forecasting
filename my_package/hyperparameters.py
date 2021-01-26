@@ -12,16 +12,22 @@ class HyperParameters:
     static_reals = ['step', 'encoder_length', 'nrn_center', 'nrn_scale']
     time_varying_categoricals_encoder = []
     time_varying_categoricals_decoder = []
+    # categorical_groups=dataset.variable_groups
     categorical_groups = {}
+    # time_varying_reals_encoder=[name for name in dataset.time_varying_known_reals if name in allowed_encoder_known_variable_names]
+    #       + dataset.time_varying_unknown_reals
     time_varying_reals_encoder = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
                                 'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos',
                                 'relative_time_idx']
+    # time_varying_reals_decoder=dataset.time_varying_known_reals,
     time_varying_reals_decoder = ['time_idx', 'dayofweek_sin',
                                 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin',
                                 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+    # x_reals=dataset.reals
     x_reals = ['step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin',
             'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors', 'ly_nrn', 'ly_dayofweek_sin',
             'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+    # x_categoricals = dataset.flat_categoricals,
     x_categoricals = ['market_id']
     hidden_continuous_size = 8
     hidden_continuous_sizes = {}

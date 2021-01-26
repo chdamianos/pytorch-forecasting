@@ -404,12 +404,17 @@ class TemporalFusionTransformer(nn.Module):
         x.keys() -> ['encoder_cat', 'encoder_cont', 'encoder_target', 'encoder_lengths', 'decoder_cat', 'decoder_cont', 'decoder_target',
         'decoder_lengths', 'decoder_time_idx', 'groups', 'target_scale']
 
+        encoder_cat order -> static_categoricals + time_varying_known_categoricals + time_varying_unknown_categoricals
         x['encoder_cat'].shape -> [batch, encoder_length, number_of_cat_features] e.g. [1, 30, 1]
+
+        encoder_cont order -> static_reals + time_varying_known_reals + time_varying_unknown_reals
         x['encoder_cont'].shape -> [1, 30, 16] -> real features normalized ['step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
             'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
         x['encoder_lengths'] -> tensor([30])
 
+        decoder_cat order -> static_categoricals + time_varying_known_categoricals + time_varying_unknown_categoricals
         x['decoder_cat'].shape -> batch, encoder_length, 1] e.g. [1, 45, 1], same as encoder_cat but for the length of the decoder e.g. tensor([[[89],[89],...]])
+        decoder_cont order -> static_reals + time_varying_known_reals + time_varying_unknown_reals
         x['decoder_cont'].shape -> [1, 45, 16] -> same as encoder_cont but for the length of the decoder
         x['decoder_lengths'] -> tensor([45])
         """
@@ -427,8 +432,8 @@ class TemporalFusionTransformer(nn.Module):
         # max_encoder_length = 30
         max_encoder_length = int(encoder_lengths.max())
         # len(input_vectors.keys()) = number of categorical features + number of real-valued features
-        # input_vectors['categorical_feature1'] = [batches, total_number_of_timesteps, n_embedding]
-        # input_vectors['real_feature1'] = [batches, total_number_of_timesteps, 1]
+        # input_vectors['categorical_feature1'] = [batch_size, total_number_of_timesteps, n_embedding]
+        # input_vectors['real_feature1'] = [batch_size, total_number_of_timesteps, 1]
         # e.g.
         # input_vectors.keys() -> len(input_vectors.keys()) = 17
         # ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale', 'time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos',
@@ -445,8 +450,8 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # Embedding and variable selection
-        # static_embedding.shape -> [batches, hidden_size] e.g. torch.Size([1, 18])
-        # static_variable_selection.shape -> [batches, 1, n] where n = n_categorical_features + n_reals_static e.g. torch.Size([3, 1, 5])
+        # static_embedding.shape -> [batch_size, hidden_size] e.g. torch.Size([1, 18])
+        # static_variable_selection.shape -> [batch_size, 1, n] where n = n_categorical_features + n_reals_static e.g. torch.Size([3, 1, 5])
         # ['market_id', 'step', 'encoder_length', 'nrn_center', 'nrn_scale']
         if len(Utils.static_variables(HyperParameters)) > 0:
             static_embedding = {name: input_vectors[name][:, 0] for name in Utils.static_variables(HyperParameters)}
@@ -456,7 +461,7 @@ class TemporalFusionTransformer(nn.Module):
                 (x_cont.size(0), HyperParameters.hidden_size), dtype=self.dtype, device=self.device
             )
             static_variable_selection = torch.zeros((x_cont.size(0), 0), dtype=self.dtype, device=self.device)
-        # static_context_variable_selection.shape -> [batches, number_timesteps, hidden_size] e.g. torch.Size([1, 75, 18])
+        # static_context_variable_selection.shape -> [batch_size, number_timesteps, hidden_size] e.g. torch.Size([1, 75, 18])
         static_context_variable_selection = Utils.expand_static_context(
             self.static_context_variable_selection(static_embedding), timesteps
         )
@@ -476,15 +481,15 @@ class TemporalFusionTransformer(nn.Module):
         embeddings_varying_encoder = {
             name: input_vectors[name][:, :max_encoder_length] for name in Utils.encoder_variables(HyperParameters)
         }
-        # embeddings_varying_encoder.shape [batches, encoder_length, hidden_shape] e.g. torch.Size([1, 30, 18])
-        # encoder_sparse_weights.shape -> [batches, encoder_length, 1, number_of_reals_that_vary_with_time]
+        # embeddings_varying_encoder.shape [batch_size, encoder_length, hidden_shape] e.g. torch.Size([1, 30, 18])
+        # encoder_sparse_weights.shape -> [batch_size, encoder_length, 1, number_of_reals_that_vary_with_time]
         # e.g. torch.Size([3, 30, 1, 12])
         embeddings_varying_encoder, encoder_sparse_weights = self.encoder_variable_selection(
             embeddings_varying_encoder,
             static_context_variable_selection[:, :max_encoder_length],
         )
-        # embeddings_varying_decoder.shape -> [batches, decoder_length, hidden_shape] e.g. torch.Size([3, 45, 18])
-        # decoder_sparse_weights.shape -> [batches, decoder_length, 1, number_of_reals_that_vary_with_time] e.g. torch.Size([3, 45, 1, 12])
+        # embeddings_varying_decoder.shape -> [batch_size, decoder_length, hidden_shape] e.g. torch.Size([3, 45, 18])
+        # decoder_sparse_weights.shape -> [batch_size, decoder_length, 1, number_of_reals_that_vary_with_time] e.g. torch.Size([3, 45, 1, 12])
         embeddings_varying_decoder = {
             name: input_vectors[name][:, max_encoder_length:] for name in Utils.decoder_variables(HyperParameters)  # select decoder
         }
@@ -495,23 +500,24 @@ class TemporalFusionTransformer(nn.Module):
 
         # LSTM
         # calculate initial state
-        # input_hidden.shape -> torch.Size([1, 1, 18])
+        # HERE!
+        # input_hidden.shape -> [1, batch_size, hidden_size], e.g. torch.Size([1, 3, 18])
         input_hidden = self.static_context_initial_hidden_lstm(static_embedding).expand(
             HyperParameters.lstm_layers, -1, -1
         )
-        # input_cell.shape -> torch.Size([1, 1, 18])
+        # input_cell.shape -> [1, batch_size, hidden_size], e.g. torch.Size([1, 3, 18])
         input_cell = self.static_context_initial_cell_lstm(static_embedding).expand(HyperParameters.lstm_layers, -1, -1)
 
         # run local encoder
-        # encoder_output.shape -> torch.Size([1, 30, 18])
-        # hidden.shape -> torch.Size([1, 1, 18])
-        # input_cell.shape -> torch.Size([1, 1, 18])
+        # encoder_output.shape -> [batch_size, encoder_length, hidden_size] e.g. torch.Size([1, 30, 18])
+        # hidden.shape -> [1, batch_size, hidden_size] e.g. torch.Size([1, 3, 18])
+        # input_cell.shape -> [1, batch_size, hidden_size] e.g. torch.Size([1, 3, 18])
         encoder_output, (hidden, cell) = self.lstm_encoder(
             embeddings_varying_encoder, (input_hidden, input_cell), lengths=encoder_lengths, enforce_sorted=False
         )
 
         # run local decoder
-        # decoder_output.shape  -> torch.Size([1, 45, 18])
+        # decoder_output.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
         decoder_output, _ = self.lstm_decoder(
             embeddings_varying_decoder,
             (hidden, cell),
@@ -520,27 +526,27 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # skip connection over lstm
-        # lstm_output_encoder.shape -> torch.Size([1, 30, 18])
+        # lstm_output_encoder.shape -> [batch_size, encoder_length, hidden_size] e.g. torch.Size([3, 30, 18])
         lstm_output_encoder = self.post_lstm_gate_encoder(encoder_output)
         lstm_output_encoder = self.post_lstm_add_norm_encoder(lstm_output_encoder, embeddings_varying_encoder)
-        # lstm_output_decoder.shape -> torch.Size([1, 45, 18])
+        # lstm_output_decoder.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
         lstm_output_decoder = self.post_lstm_gate_decoder(decoder_output)
         lstm_output_decoder = self.post_lstm_add_norm_decoder(lstm_output_decoder, embeddings_varying_decoder)
-        # lstm_output.shape -> torch.Size([1, 75, 18])
+        # lstm_output.shape -> [batch_size, decoder_length+encoder_length, hidden_size] e.g. torch.Size([3, 75, 18])
         lstm_output = torch.cat([lstm_output_encoder, lstm_output_decoder], dim=1)
 
         # static enrichment
-        # static_context_enrichment.shape -> torch.Size([1, 18])
-        # attn_input.shape -> torch.Size([1, 75, 18])
+        # static_context_enrichment.shape -> [batch_size, hidden_size] e.g. torch.Size([3, 18])
+        # attn_input.shape -> [batch_size, encoder_length+decoder_length, hidden_size] e.g. torch.Size([3, 75, 18])
         static_context_enrichment = self.static_context_enrichment(static_embedding)
         attn_input = self.static_enrichment(
             lstm_output, Utils.expand_static_context(static_context_enrichment, timesteps)
         )
 
         # Attention
-        # attn_input[:, max_encoder_length:].shape -> torch.Size([1, 45, 18])
-        # attn_output.shape -> torch.Size([1, 45, 18])
-        # attn_output.shape -> torch.Size([1, 45, 1, 75])
+        # attn_input[:, max_encoder_length:].shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
+        # attn_output.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
+        # attn_output.shape -> [batch_size, decoder_length, 1, encoder_length+decoder_length] e.g. torch.Size([3, 45, 1, 75])
         attn_output, attn_output_weights = self.multihead_attn(
             q=attn_input[:, max_encoder_length:],  # query only for predictions
             k=attn_input,
@@ -551,19 +557,19 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # skip connection over attention
-        # attn_output.shape -> torch.Size([1, 45, 18])
+        # attn_output.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
         attn_output = self.post_attn_gate_norm(attn_output, attn_input[:, max_encoder_length:])
-        # output.shape -> torch.Size([1, 45, 18])
+        # output.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
         output = self.pos_wise_ff(attn_output)
 
         # skip connection over temporal fusion decoder (not LSTM decoder despite the LSTM output contains
         # a skip from the variable selection network)
-        # output.shape -> torch.Size([1, 45, 18])
+        # output.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 18])
         output = self.pre_output_gate_norm(output, lstm_output[:, max_encoder_length:])
         if HyperParameters.n_targets > 1:  # if to use multi-target architecture
             output = [output_layer(output) for output_layer in self.output_layer]
         else:
-            # output.shape -> torch.Size([1, 45, 7])
+            # output.shape -> [batch_size, decoder_length, hidden_size] e.g. torch.Size([3, 45, 7])
             output = self.output_layer(output)
 
         return dict(
