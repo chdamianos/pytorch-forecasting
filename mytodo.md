@@ -19,7 +19,6 @@ def get_embedding_size(n: int, max_size: int = 100) -> int:
 
 # Left at 
 * pytorch-forecasting/my_package/tft_2.py:498
-* order of rows 
 * output is standardized ((x-mu)/std) and also a softplus is applied to it after
   * try x/x.max() and also trainable softplus output activation??
   * have a look at the code to understand if target is normalized
@@ -28,6 +27,48 @@ def get_embedding_size(n: int, max_size: int = 100) -> int:
 for categorical variables we use nn.Embedding
 ## real variables 
 for real variables we use just the real value (size=1)
+
+# Features row order
+```python
+@property
+def reals(self) -> List[str]:
+    """
+    Continous variables as used for modelling.
+
+    self.static_reals = ['step', 'encoder_length', 'nrn_center', 'nrn_scale']
+    self.time_varying_known_reals = ['time_idx', 'dayofweek_sin', 'dayofweek_cos', 'month_sin', 'month_cos', 'ly_n_visitors',
+                       'ly_nrn', 'ly_dayofweek_sin', 'ly_dayofweek_cos', 'ly_month_sin', 'ly_month_cos', 'relative_time_idx']
+    self.time_varying_unknown_reals = []
+
+    Returns:
+        List[str]: list of variables
+    """
+    return self.static_reals + self.time_varying_known_reals + self.time_varying_unknown_reals
+
+@property
+def categoricals(self) -> List[str]:
+    """
+    Categorical variables as used for modelling.
+
+    self.static_categoricals=['market_id']
+    self.time_varying_known_categoricals=[]
+    self.time_varying_unknown_categoricals=[]
+
+    Returns:
+        List[str]: list of variables
+    """
+    return self.static_categoricals + self.time_varying_known_categoricals + self.time_varying_unknown_categoricals
+
+data_cont = self.data["reals"][index.index_start : index.index_end + 1].clone()
+data_cat = self.data["categoricals"][index.index_start : index.index_end + 1].clone()
+batch[0] = dict(x_cat=data_cat, x_cont=data_cont, encoder_length=encoder_length, decoder_length=decoder_length,
+    encoder_target=encoder_target, encoder_time_idx_start=time[0], groups=groups, target_scale=target_scale)
+# features
+encoder_cont = rnn.pad_sequence([batch[0]["x_cont"][:length] for length, batch in zip(encoder_lengths, batches)], batch_first=True)
+encoder_cat = rnn.pad_sequence([batch[0]["x_cat"][:length] for length, batch in zip(encoder_lengths, batches)], batch_first=True)
+decoder_cont = rnn.pad_sequence([batch[0]["x_cont"][length:] for length, batch in zip(encoder_lengths, batches)], batch_first=True)
+decoder_cat = rnn.pad_sequence([batch[0]["x_cat"][length:] for length, batch in zip(encoder_lengths, batches)], batch_first=True)
+```
 
 # VariableSelectionNetwork 
 var_outputs = []
