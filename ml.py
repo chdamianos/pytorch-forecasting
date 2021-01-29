@@ -1,3 +1,4 @@
+import numba
 import gc
 import pandas as pd
 import pytorch_lightning as pl
@@ -17,7 +18,8 @@ def preprocess(pdf: pd.DataFrame):
     return pdf
 
 
-data_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/fe2_small_sample_sdf.parquet"
+# data_location = "/home/damianos/Documents/projects/tft_walkthrough/pytorch-forecasting/fe2_small_sample_sdf.parquet"
+data_location = "/Users/dchristophides/OneDrive - Expedia Group/brain/renewal/V2/data/fe2_small_sample_sdf/fe2_small_sample_sdf.parquet"
 data_pdf = pd.read_parquet(data_location)
 data_pdf = data_pdf.query("nrn!=-999")
 ratio_train = 0.7

@@ -212,6 +212,17 @@ class TemporalFusionTransformer(nn.Module):
             loss = QuantileLoss
         # processing inputs
         # embeddings
+        # HyperParameters.embedding_sizes -> {"cat_feat1":[size_of_input, size_of_embedding_output], ...} e.g. {'market_id': [1801, 16]}
+        # HyperParameters.categorical_groups -> e.g. {}
+        # HyperParameters.embedding_paddings -> e.g. []
+        # HyperParameters.x_categoricals -> ['market_id']
+        # HyperParameters.hidden_size -> 18
+
+        # self.input_embeddings -> MultiEmbedding(
+        #   (embeddings): ModuleDict(
+        #     (market_id): Embedding(1801, 16)
+        #   )
+        # )
         self.input_embeddings = MultiEmbedding(
             embedding_sizes=HyperParameters.embedding_sizes,
             categorical_groups=HyperParameters.categorical_groups,
@@ -221,8 +232,12 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # continuous variable processing for every real, even if static
-        # hidden_continuous_sizes -> custom/specific embedding size 
-        # hidden_continuous_size -> default 
+        # hidden_continuous_sizes (custom/specific embedding size)  -> {'real_feat1': hidden_size1, ...} -> e.g. {}
+        # hidden_continuous_size -> default -> e.g. 8
+
+        # self.prescalers -> ModuleDict(
+        #   (step): Linear(in_features=1, out_features=8, bias=True)
+        #   (encoder_length): Linear(in_features=1, out_features=8, bias=True)...)
         self.prescalers = nn.ModuleDict(
             {
                 name: nn.Linear(1, HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size))
@@ -231,14 +246,23 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # variable selection for static variables
+        # embedding_sizes-> {"cat_feat1":[size_of_input, size_of_embedding_output], ...} e.g. {'market_id': [1801, 16]}
+        # static_input_sizes -> {"cat_feat1":size_of_embedding_output1, ...} e.g. {'market_id': 16}
         static_input_sizes = {name: HyperParameters.embedding_sizes[name][1]
                               for name in HyperParameters.static_categoricals}
+        # HyperParameters.static_reals -> ['static_feat1', ...] e.g. ['step', 'encoder_length', 'nrn_center', 'nrn_scale']
+        # static_input_sizes -> {"cat_feat1":size_of_embedding_output1, ..., 'static_feat1', hidden_continuous_size, ...} e.g.
+        # {'market_id': 16, 'step': 8, 'encoder_length': 8, 'nrn_center': 8, 'nrn_scale': 8}
         static_input_sizes.update(
             {
                 name: HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size)
                 for name in HyperParameters.static_reals
             }
         )
+
+        # static_categoricals-> ['static_cat1', 'static_cat2', ...] e.g. ['market_id']
+        # static_input_sizes -> {"cat_feat1":size_of_embedding_output1, ..., 'static_feat1', hidden_continuous_size, ...} e.g.
+        #       {'market_id': 16, 'step': 8, 'encoder_length': 8, 'nrn_center': 8, 'nrn_scale': 8}
         self.static_variable_selection = VariableSelectionNetwork(
             input_sizes=static_input_sizes,
             hidden_size=HyperParameters.hidden_size,
@@ -247,9 +271,14 @@ class TemporalFusionTransformer(nn.Module):
             prescalers=self.prescalers,
         )
         # variable selection for encoder
+        # HyperParameters.time_varying_categoricals_encoder -> e.g. []
+        # encoder_input_sizes -> e.g. {}
         encoder_input_sizes = {
             name: HyperParameters.embedding_sizes[name][1] for name in HyperParameters.time_varying_categoricals_encoder
         }
+        # time_varying_reals_encoder -> ['cont_time_varying_feat_1', 'cont_time_varying_feat_2', ...]
+        # encoder_input_sizes -> {'cat_time_varying_feat_1': embedding_size_cat1, ..., 'cont_time_varying_feat_1': hidden_continuous_size, ...}
+        # e.g. {'time_idx': 8, 'dayofweek_sin': 8, 'dayofweek_cos': 8,... }
         encoder_input_sizes.update(
             {
                 name: HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size)
@@ -257,9 +286,14 @@ class TemporalFusionTransformer(nn.Module):
             }
         )
         # variable selection for decoder
+        # HyperParameters.time_varying_categoricals_decoder -> e.g. []
+        # decoder_input_sizes-> e.g. {}
         decoder_input_sizes = {
             name: HyperParameters.embedding_sizes[name][1] for name in HyperParameters.time_varying_categoricals_decoder
         }
+        # time_varying_reals_decoder -> ['cont_time_varying_feat_1', 'cont_time_varying_feat_2', ...]
+        # decoder_input_sizes -> {'cat_time_varying_feat_1': embedding_size_cat1, ..., 'cont_time_varying_feat_1': hidden_continuous_size, ...}
+        # e.g. {'time_idx': 8, 'dayofweek_sin': 8, 'dayofweek_cos': 8,... }
         decoder_input_sizes.update(
             {
                 name: HyperParameters.hidden_continuous_sizes.get(name, HyperParameters.hidden_continuous_size)
@@ -284,6 +318,12 @@ class TemporalFusionTransformer(nn.Module):
                         HyperParameters.hidden_size,
                         HyperParameters.dropout,
                     )
+        # HyperParameters.time_varying_categoricals_encoder -> []
+        # encoder_input_sizes -> e.g. {'time_idx': 8, 'dayofweek_sin': 8, 'dayofweek_cos': 8, ...}
+        # HyperParameters.hidden_size -> 18
+        # prescalers -> ModuleDict(
+        #   (step): Linear(in_features=1, out_features=8, bias=True)
+        #   (encoder_length): Linear(in_features=1, out_features=8, bias=True)
         self.encoder_variable_selection = VariableSelectionNetwork(
             input_sizes=encoder_input_sizes,
             hidden_size=HyperParameters.hidden_size,
@@ -295,6 +335,7 @@ class TemporalFusionTransformer(nn.Module):
             if not HyperParameters.share_single_variable_networks
             else self.shared_single_variable_grns,
         )
+        # same as above but for decoder
         self.decoder_variable_selection = VariableSelectionNetwork(
             input_sizes=decoder_input_sizes,
             hidden_size=HyperParameters.hidden_size,
@@ -500,7 +541,6 @@ class TemporalFusionTransformer(nn.Module):
 
         # LSTM
         # calculate initial state
-        # HERE!
         # input_hidden.shape -> [1, batch_size, hidden_size], e.g. torch.Size([1, 3, 18])
         input_hidden = self.static_context_initial_hidden_lstm(static_embedding).expand(
             HyperParameters.lstm_layers, -1, -1

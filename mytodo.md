@@ -18,6 +18,7 @@ def get_embedding_size(n: int, max_size: int = 100) -> int:
 ```
 
 # Left at 
+* create a class that creates hyperparameters based on the same input we give to Timeseries constructor
 * try it out!
 * output is standardized ((x-mu)/std) and also a softplus is applied to it after
   * try x/x.max() and also trainable softplus output activation??

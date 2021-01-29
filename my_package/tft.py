@@ -237,13 +237,6 @@ class TemporalFusionTransformer(nn.Module):
             loss = QuantileLoss
         # processing inputs
         # embeddings
-        """
-        used to be 
-        self.input_embeddings =
-        MultiEmbedding(
-        (embeddings): ModuleDict(
-            (market_id): Embedding(1801, 16)))
-        """
         self.input_embeddings = MultiEmbedding(
             embedding_sizes=HyperParameters.embedding_sizes,
             categorical_groups=HyperParameters.categorical_groups,
