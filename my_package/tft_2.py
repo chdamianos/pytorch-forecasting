@@ -14,7 +14,18 @@ import torch
 from typing import List, Union, Dict, Tuple
 import torch.nn as nn
 import numpy as np
-from hyperparameters import HyperParameters
+from hyperparameters import HyperParameters as hp
+
+static_categoricals = ["market_id"]
+static_reals = ["step"]
+time_varying_known_categoricals = []
+time_varying_known_reals = ["time_idx", "dayofweek_sin", "dayofweek_cos", "month_sin", "month_cos", "ly_n_visitors", "ly_nrn", "ly_dayofweek_sin",
+                            "ly_dayofweek_cos", "ly_month_sin", "ly_month_cos"]
+time_varying_unknown_categoricals = []
+time_varying_unknown_reals = []
+
+HyperParameters = hp(static_categoricals, time_varying_known_categoricals, time_varying_known_reals, time_varying_unknown_categoricals,
+                     time_varying_unknown_reals, static_categoricals)
 
 
 def QuantileLoss(y_pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -129,7 +140,6 @@ class TemporalFusionTransformer(nn.Module):
             dropout: float = 0.1,
             output_size: Union[int, List[int]] = 7,
             n_targets: int = 1,
-            loss=None,
             attention_head_size: int = 4,
             max_encoder_length: int = 10,
             static_categoricals: List[str] = [],
@@ -208,8 +218,6 @@ class TemporalFusionTransformer(nn.Module):
         """
         super().__init__()
         self.device = device
-        if loss is None:
-            loss = QuantileLoss
         # processing inputs
         # embeddings
         # HyperParameters.embedding_sizes -> {"cat_feat1":[size_of_input, size_of_embedding_output], ...} e.g. {'market_id': [1801, 16]}
