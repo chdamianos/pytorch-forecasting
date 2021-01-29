@@ -122,4 +122,3 @@ class HyperParameters:
         self.time_varying_categoricals_decoder = self.time_varying_known_categoricals
         self.time_varying_categoricals_encoder = [name for name in self.time_varying_known_categoricals if
                                                   name in self.allowed_encoder_known_variable_names] + self.time_varying_unknown_categoricals
-        a = 1
