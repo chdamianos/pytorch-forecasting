@@ -17,15 +17,16 @@ import numpy as np
 from hyperparameters import HyperParameters as hp
 
 static_categoricals = ["market_id"]
-static_reals = ["step"]
+static_reals = ['step', 'encoder_length', 'nrn_center', 'nrn_scale']
 time_varying_known_categoricals = []
 time_varying_known_reals = ["time_idx", "dayofweek_sin", "dayofweek_cos", "month_sin", "month_cos", "ly_n_visitors", "ly_nrn", "ly_dayofweek_sin",
-                            "ly_dayofweek_cos", "ly_month_sin", "ly_month_cos"]
+                            "ly_dayofweek_cos", "ly_month_sin", "ly_month_cos", "relative_time_idx"]
 time_varying_unknown_categoricals = []
 time_varying_unknown_reals = []
+embedding_sizes = {'market_id': [1801, 16]}
 
 HyperParameters = hp(static_categoricals, time_varying_known_categoricals, time_varying_known_reals, time_varying_unknown_categoricals,
-                     time_varying_unknown_reals, static_categoricals)
+                     time_varying_unknown_reals, static_reals, embedding_sizes)
 
 
 def QuantileLoss(y_pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
